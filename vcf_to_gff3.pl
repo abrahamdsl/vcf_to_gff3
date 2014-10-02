@@ -41,7 +41,9 @@ my $countSNP = 0;
 my $countINDEL = 0;
 my $debugMode = 0;
 my $noUnderscore = 0;
+my $noReadDepth;
 my $separator = "_";
+my $simpleFeatureName;
 my $usage = "
 
 Synopsis:
@@ -57,7 +59,9 @@ Options:
  --orgsource2    Optional. A string describing the organization/institute that is source of the features, put in the beginning of the name. Default to 'loc'.
  --string_tag    Required. A string of minlength 1 to describe the features.
  --nounderscore  Optional. Do not separate the --orgsource from the rest of the characters in the features' name/ID. Default false. 
- 
+ --simple        Optional. Specifying this will cause the program to name the resulting features in the (string_tag)(underscore)(order of feature) pattern, [ ex: EMS_1 ], instead of the one described below. Also, --orgsource2 will not be considered.
+ --no-depth      Optional. Do not include read depth on the GFF3 column 9. Allele frequency which is included could  already tell people about it.
+
 Description:
 
 This script will convert VCF files to GFF3.
@@ -70,10 +74,12 @@ my ($help, $build, $append, $path);
 
 my $opt_success = GetOptions('help'    => \$help,
                              'nounderscore' => \$noUnderscore,
-                             'orgsource=s' => \$sourceName,                             
+                             'no-depth' => \$noReadDepth,
+                             'orgsource=s' => \$sourceName,
                              'orgsource2=s' => \$featureIDStart,
-					         'path=s'  => \$path,
-                             'string_tag=s' => \$datasetTag
+		             'path=s'  => \$path,
+                             'string_tag=s' => \$datasetTag,
+                             'simple' => \$simpleFeatureName
 );
 
 die $usage if $help || ! $opt_success;
@@ -135,7 +141,7 @@ for my $vcf_file (@vcf_files) {
   handle_message( 'NOTICE', 'Processing file', $vcf_file );
   handle_message( 'NOTICE', 'Writing to file', $gff_file );
   while (my $line = <$IN>) {    
-    if( $line =~ /^#/ or $line =~ /^super/ ){ next; }
+    if( $line =~ /^#/ or $line =~ /^super/ or ( length( $line ) < 2 ) ){ next; }
     my @data = split /\t/, $line;
     #CHROM POS ID REF ALT QUAL FILTER INFO FORMAT SAMPLE1
     my %record;
@@ -162,7 +168,7 @@ for my $vcf_file (@vcf_files) {
  
     my @infos = split( /;/, $record{info} );
     # Which details in the INFO field do you want to include?
-    my @wanted = qw(AF DP);
+    my @wanted = ( $noReadDepth ) ?  qw(AF) : qw(AF DP);
     my $wantedCount = scalar( @wanted );
     my $count = 0;
     my %includeMisc;
@@ -207,11 +213,13 @@ for my $vcf_file (@vcf_files) {
       $type = "indel";  # It seems to me, Chado and GBrowse is not okay if this is in CAPS!
 	      $end = ($start + length($reference_seq)) - 1;
       $countINDEL += 1;       
-      $featureID .= ( $separator . "I" . $datasetTag . $countINDEL );
+#     $featureID .= ( $separator . "I" . $datasetTag . $countINDEL );
+      $featureID = constructFeatureID( $simpleFeatureName, $separator, "I", $datasetTag, $countINDEL, $featureIDStart );
      }else{
        $type = "SNP";
        $countSNP += 1;
-       $featureID .= ( $separator . "S" . $datasetTag . $countSNP );
+#      $featureID .= ( $separator . "S" . $datasetTag . $countSNP );
+       $featureID = constructFeatureID( $simpleFeatureName, $separator, "S", $datasetTag, $countSNP, $featureIDStart );
      }
 
      foreach( @variant_seqs ){   
@@ -222,8 +230,29 @@ for my $vcf_file (@vcf_files) {
       print $OUThandle "$seqid\t$sourceName\t$type\t$start\t$end\t$score\t$strand\t$phase\tID=$featureID;Name=$featureID;Note=$note\n";
      }
   }
-  handle_message( 'NOTICE', 'Finished', 'Written to $gff_file .' );
+  handle_message( 'NOTICE', 'Finished', "Written to $gff_file ." );
 }
+
+sub constructFeatureID {
+=doc
+  Constructs the appropriate feature ID for the feature concerned.
+  
+  Arguments:
+    0 - int. Use simple names or not?
+	1 - string. Separator, if applicable.
+	2 - string. "I" or "S" or "" ( indel, SNP, none )
+	3 - string. Data set tag
+	4 - int. The ordinal number of this feature
+    5 - string. Source of the feature ( VCF 2nd column, 1-index)
+  Returns:
+    String. The constructed feature ID.
+=cut
+  if ( $_[0] ) {
+    return $_[3] . $_[1] . $_[2] .  $_[4];
+  }else{
+    return $_[5] . $_[1] . $_[2] . $_[3] . $_[4];
+  }
+} # sub
 
 sub handle_message {
   my $message;
